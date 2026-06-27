@@ -1,0 +1,53 @@
+[
+  {
+    "id": "high-risk-nnn",
+    "description": "High-risk NNN lease with multiple red flags",
+    "lease_type": "NNN",
+    "monthly_rent": 8500,
+    "escalation_pct": 4.0,
+    "cam_cap_pct": 0,
+    "deposit_months": 3,
+    "has_personal_guarantee": true,
+    "auto_renewal_notice_days": 60,
+    "subletting_allowed": false,
+    "landlord_entry_notice_days": 1,
+    "early_termination_penalty_months": 8,
+    "holdover_rent_multiplier": 2.0,
+    "has_break_clause": false,
+    "assignment_rights": "sole and absolute discretion"
+  },
+  {
+    "id": "low-risk-gross",
+    "description": "Tenant-friendly gross lease",
+    "lease_type": "gross",
+    "monthly_rent": 5000,
+    "escalation_pct": 3.0,
+    "cam_cap_pct": 0,
+    "deposit_months": 2,
+    "has_personal_guarantee": false,
+    "auto_renewal_notice_days": 180,
+    "subletting_allowed": true,
+    "landlord_entry_notice_days": 2,
+    "early_termination_penalty_months": 3,
+    "holdover_rent_multiplier": 1.25,
+    "has_break_clause": true,
+    "assignment_rights": "consent not unreasonably withheld"
+  },
+  {
+    "id": "medium-risk-modified-gross",
+    "description": "Modified gross lease with some negotiation points",
+    "lease_type": "modified-gross",
+    "monthly_rent": 6500,
+    "escalation_pct": 3.5,
+    "cam_cap_pct": 5,
+    "deposit_months": 2,
+    "has_personal_guarantee": true,
+    "auto_renewal_notice_days": 90,
+    "subletting_allowed": false,
+    "landlord_entry_notice_days": 2,
+    "early_termination_penalty_months": 4,
+    "holdover_rent_multiplier": 1.5,
+    "has_break_clause": false,
+    "assignment_rights": "consent required"
+  }
+]

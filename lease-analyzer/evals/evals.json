@@ -1,0 +1,42 @@
+{
+  "skill_name": "lease-analyzer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Analyze this lease: NNN lease at $8,500/mo with 4% annual escalation, no CAM cap, 3-month deposit, personal guarantee required, 60-day auto-renewal notice, subletting requires landlord consent, holdover at 200% of base rent, no break clause, early termination penalty of 8 months.",
+      "expected_output": "Risk report flagging personal guarantee, NNN true cost, uncapped CAM, above-market escalation, short auto-renewal notice, high holdover rate, no break clause, and high termination penalty. Should include negotiation asks for each.",
+      "files": [],
+      "assertions": [
+        "Output flags personal guarantee as high severity",
+        "Output mentions NNN true cost estimate or NNN load",
+        "Output flags holdover at 200% or mentions holdover trap",
+        "Output includes at least 3 specific negotiation asks",
+        "Output includes an overall risk score or rating"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review this office lease: Gross lease, $5,000/month, 3% annual escalation, 2-month deposit, no personal guarantee, 180-day auto-renewal notice, subletting allowed, holdover at 125%, has break clause at year 3.",
+      "expected_output": "Clean report showing mostly favorable terms. Should identify this as a relatively tenant-friendly lease with minimal red flags.",
+      "files": [],
+      "assertions": [
+        "Output does not flag personal guarantee (there is none)",
+        "Output identifies lease as gross (favorable)",
+        "Output notes break clause is present",
+        "Output gives a relatively low risk score (under 40/100)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I'm signing a commercial lease. It has a personal guarantee, the landlord can enter with just 12 hours notice, and the assignment clause says landlord has sole and absolute discretion to approve any assignment.",
+      "expected_output": "Should flag all three items as serious risks: personal guarantee, short entry notice, and assignment clause that blocks M&A.",
+      "files": [],
+      "assertions": [
+        "Output flags personal guarantee",
+        "Output flags landlord entry notice as insufficient",
+        "Output flags assignment clause as M&A risk or deal-killer",
+        "Output includes good guy clause as negotiation suggestion"
+      ]
+    }
+  ]
+}
