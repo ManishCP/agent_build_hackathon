@@ -56,12 +56,14 @@ HTML_TEMPLATE = """
     .result-box { background: #1a1a18; color: #e0e0d8; border-radius: 10px;
                   padding: 1.25rem 1.5rem; font-family: monospace; font-size: 12px;
                   line-height: 1.8; white-space: pre-wrap; overflow-x: auto; }
-    .score-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-                  margin: 0 0 1rem 0; }
-    .score-card { border-radius: 10px; padding: 1rem; text-align: center; border: 1px solid transparent; }
-    .score-card .num { font-size: 2rem; font-weight: 600; line-height: 1; }
-    .score-card .lbl { font-size: 11px; color: #666; margin-top: 4px;
-                       text-transform: uppercase; letter-spacing: .05em; }
+    .score-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+                  margin: 0 0 1rem 0; overflow: hidden; }
+    .score-card { border-radius: 10px; padding: .75rem .5rem; text-align: center;
+                  border: 1px solid transparent; min-width: 0; box-sizing: border-box; }
+    .score-card .num { font-size: 1.6rem; font-weight: 600; line-height: 1; }
+    .score-card .lbl { font-size: 10px; color: #666; margin-top: 4px;
+                       text-transform: uppercase; letter-spacing: .04em;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .risk-red { background: #fef2f2; border-color: #fca5a5; }
     .risk-red .num { color: #dc2626; }
     .risk-yel { background: #fffbeb; border-color: #fcd34d; }
@@ -117,9 +119,22 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
 
       <div class="divider"></div>
 
-      <div style="margin-bottom:.75rem">
-        <input type="file" name="lease_file" accept=".txt,.pdf">
-        <div class="meta">Upload a .txt or .pdf lease document</div>
+      <div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap; margin-bottom:.75rem;">
+        <div style="flex:1; min-width:200px;">
+          <div class="meta" style="margin-bottom:4px;">Upload a file</div>
+          <input type="file" name="lease_file" accept=".txt,.pdf">
+        </div>
+        <div style="flex:1; min-width:200px;">
+          <div class="meta" style="margin-bottom:4px;">— or select a sample lease —</div>
+          <select name="sample_file" id="sample-select"
+                  style="width:100%; padding:8px 10px; border:1px solid #ddd; border-radius:8px; font-size:13px; background:white; color:#444;"
+                  onchange="onSampleChange(this)">
+            <option value="">Choose from library...</option>
+            {% for f in sample_files %}
+            <option value="{{ f.path }}">{{ f.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
 
       <div class="options">
@@ -130,7 +145,6 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
         <label>
           <input type="checkbox" name="frontier" value="1" checked> Use Claude Sonnet (faster + better)
         </label>
-        <a href="/sample" class="btn btn-outline">Load sample lease</a>
       </div>
 
       <div id="loading-msg" style="display:none; margin-top:12px; font-size:13px; color:#888;">
@@ -150,6 +164,14 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
         btn.textContent = 'Analyzing...';
         msg.style.display = 'block';
         setTimeout(function() { bar.style.width = '95%'; }, 100);
+      }
+      function onSampleChange(sel) {
+        // Clear any uploaded file when a sample is selected
+        if (sel.value) {
+          var fileInput = document.querySelector('input[name="lease_file"]');
+          if (fileInput) fileInput.value = '';
+          document.querySelector('textarea[name="lease_text"]').value = '';
+        }
       }
     </script>
   </div>
@@ -232,6 +254,25 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
 </body>
 </html>
 """
+
+
+def list_sample_files() -> list:
+    """Return sorted list of available lease files for the dropdown."""
+    files = []
+    # Built-in sample
+    builtin = PROJECT_ROOT / "evals" / "files" / "sample_lease.txt"
+    if builtin.exists():
+        files.append({"path": str(builtin), "label": "📄 sample_lease.txt (built-in)"})
+    # Leases directory — skip temp/hidden files
+    leases_dir = PROJECT_ROOT / "leases"
+    skip = {"_pasted_text.txt", "README.md"}
+    for ext in ["*.pdf", "*.txt"]:
+        for f in sorted(leases_dir.glob(ext)):
+            if f.name in skip or f.name.startswith(".") or f.name.startswith("_"):
+                continue
+            prefix = "📑" if f.suffix == ".pdf" else "📄"
+            files.append({"path": str(f), "label": f"{prefix} {f.name}"})
+    return files
 
 
 def score_class(score):
@@ -329,7 +370,7 @@ def index():
         HTML_TEMPLATE,
         result=None, scores=None, meta=None,
         history=load_history(), prefill=None,
-        score_class=score_class,
+        score_class=score_class, sample_files=list_sample_files(),
     )
 
 
@@ -341,16 +382,17 @@ def load_sample():
         HTML_TEMPLATE,
         result=None, scores=None, meta=None,
         history=load_history(), prefill=text,
-        score_class=score_class,
+        score_class=score_class, sample_files=list_sample_files(),
     )
 
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    lease_text = request.form.get("lease_text", "").strip()
-    lease_file = request.files.get("lease_file")
-    no_skill   = request.form.get("no_skill") == "1"
-    frontier   = request.form.get("frontier") == "1"
+    lease_text  = request.form.get("lease_text", "").strip()
+    lease_file  = request.files.get("lease_file")
+    sample_file = request.form.get("sample_file", "").strip()
+    no_skill    = request.form.get("no_skill") == "1"
+    frontier    = request.form.get("frontier") == "1"
 
     leases_dir = PROJECT_ROOT / "leases"
     leases_dir.mkdir(exist_ok=True)
@@ -359,6 +401,8 @@ def analyze():
         tmp_path = leases_dir / lease_file.filename
         lease_file.save(str(tmp_path))
         cmd_input = str(tmp_path)
+    elif sample_file and Path(sample_file).exists():
+        cmd_input = sample_file
     elif lease_text:
         tmp_path = leases_dir / "_pasted_text.txt"
         tmp_path.write_text(lease_text)
@@ -404,6 +448,7 @@ def analyze():
         history=load_history(),
         prefill=None,
         score_class=score_class,
+        sample_files=list_sample_files(),
     )
 
 

@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 logs/*.jsonl
 .env
+.DS_Store
