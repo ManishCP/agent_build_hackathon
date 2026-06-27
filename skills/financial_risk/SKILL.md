@@ -1,12 +1,10 @@
 ---
 name: financial-risk
 description: >
-  Analyze financial terms in a commercial lease document. Identify NNN charges,
-  CAM fees and caps, rent escalation rates, deposit requirements, and estimate
-  the true monthly cost beyond stated base rent. Use when the lease contains
-  any of: NNN, triple net, CAM, common area maintenance, base rent, additional
-  rent, operating expenses, rent escalation, CPI adjustment, deposit, security
-  deposit.
+  Analyze financial terms in a commercial lease. NNN charges, CAM fees,
+  rent escalation, deposit size, true monthly cost. Use when lease contains:
+  NNN, triple net, CAM, base rent, additional rent, escalation, deposit,
+  operating expenses.
 license: MIT
 metadata:
   author: lease-analyzer-team
@@ -15,55 +13,27 @@ metadata:
 
 # Financial risk skill
 
-## When to activate
-Activate when analyzing financial terms in a commercial lease. This skill
-covers: lease type classification, true cost estimation, escalation analysis,
-and CAM risk assessment.
-
 ## Instructions
+1. Call `analyze_financial_terms` with all extracted values
+2. If a value is missing, use conservative defaults and note it
+3. Always surface the estimated true monthly cost (NNN adds 20-40%)
+4. Compare escalation to 2-3%/yr market benchmark
+5. Use the output template below — no prose rambling
 
-1. Call `analyze_financial_terms` with all values you can extract from the lease.
-2. If monthly rent is not stated, note this explicitly in the output.
-3. Always calculate and surface the estimated true monthly cost (base + NNN load).
-4. Compare escalation rate to the 2–3%/yr market benchmark.
-
-## Gotchas — never get these wrong
-
-- **NNN true cost**: A "triple net" lease means tenant pays base rent PLUS
-  property taxes, building insurance, and maintenance. The NNN load is
-  typically 20–40% on top of stated rent. Always surface this.
-- **Uncapped CAM**: CAM with no annual cap = unlimited exposure. Flag as 🔴.
-  Market standard cap is 3–5% per year.
-- **Rent escalation over 3%/yr**: Flag as above-market. Over 5%/yr = red flag.
-- **Deposit over 2 months**: Flag. More than 2 months is above market for most
-  commercial spaces.
-- **"Additional rent"**: This phrase in a lease almost always means NNN or CAM
-  charges are coming. Flag it even if amounts aren't specified.
-
-## Benchmark thresholds
-
-| Term | 🟢 Standard | 🟡 Flag | 🔴 Red flag |
-|------|-------------|---------|-------------|
-| Lease type | Gross | Modified gross | NNN uncapped |
-| Escalation | ≤3%/yr | 3–5%/yr | >5%/yr or uncapped |
-| CAM cap | 3–5%/yr cap | >5%/yr cap | No cap |
-| Deposit | 1–2 months | 2–3 months | >3 months |
+## Gotchas
+- NNN uncapped = unlimited tenant exposure — always flag 🔴
+- "Additional rent" phrase = NNN charges incoming — flag even if amounts unstated
+- Escalation >3%/yr = above market; >5%/yr = red flag
+- Deposit >2 months = above market
+- Never trust stated rent as true cost on NNN leases
 
 ## Output template
-
-```
 ### Financial Risk: [SCORE]/100
-
 | Term | Value | Benchmark | Risk |
 |------|-------|-----------|------|
 | Lease type | [type] | Gross preferred | 🟢/🟡/🔴 |
-| Base rent | $[amount]/mo | — | — |
-| Estimated true cost | $[total]/mo | — | 🟡/🔴 if NNN |
+| True monthly cost | $[total]/mo | = base rent on gross | 🟢/🟡/🔴 |
 | Escalation | [pct]%/yr | 2–3%/yr | 🟢/🟡/🔴 |
-| CAM cap | [pct]% or None | 3–5%/yr | 🟢/🟡/🔴 |
+| CAM cap | [pct]% or None | 3–5%/yr cap | 🟢/🟡/🔴 |
 | Deposit | [months] months | 1–2 months | 🟢/🟡/🔴 |
-
-**Key findings:**
-- [finding 1]
-- [finding 2]
-```
+**Key findings:** [2-3 bullet points max]

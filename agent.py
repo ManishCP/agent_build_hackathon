@@ -248,17 +248,29 @@ def run_lease_analysis(filename: str, content: str, model: str,
     print(f"Mode: {mode} | Model: {model}")
     print(f"{'='*60}\n")
 
-    task = f"""
-Analyze the following commercial lease document and produce a complete risk report.
+    task = f"""Analyze this commercial lease and produce a risk report.
 
-Extract all financial terms, legal clauses, and exit conditions you can find.
-Call ALL THREE analysis tools (analyze_financial_terms, analyze_legal_clauses,
-analyze_exit_terms) with the values you extract.
-If a value is not stated in the lease, use a conservative default and note it.
+IMPORTANT: Extract ALL values from the lease in your FIRST response, then call ALL THREE analysis tools immediately. Do not think between tool calls — extract once, call all tools, then write the report.
 
-LEASE DOCUMENT:
-{content}
-"""
+Extract these values:
+- lease_type (NNN/gross/modified-gross)
+- monthly_rent (number)
+- escalation_pct (number, annual %)
+- cam_cap_pct (number, 0 if uncapped)
+- deposit_months (number)
+- has_personal_guarantee (true/false)
+- auto_renewal_notice_days (number)
+- subletting_allowed (true/false)
+- landlord_entry_notice_days (number)
+- early_termination_penalty_months (number)
+- holdover_rent_multiplier (number, e.g. 2.0 for 200%)
+- has_break_clause (true/false)
+- assignment_rights (free/consent-required/prohibited/sole-discretion)
+
+Then call all 3 tools with extracted values, then write the final report using skill output templates.
+
+LEASE:
+{content[:4000]}"""
 
     agent_result = run_agent(
         task=task,

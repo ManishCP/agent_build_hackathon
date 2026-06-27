@@ -100,7 +100,7 @@ HTML_TEMPLATE = """
     <h1>Lease Analyzer Agent</h1>
     <div class="sub">TOA Agent Build Day 2026 · Lane 1</div>
   </div>
-  <span class="badge">granite4:micro</span>
+  <span class="badge">Claude Sonnet · Granite local</span>
   <span class="badge">4 skills</span>
 </div>
 
@@ -128,23 +128,28 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
           <input type="checkbox" name="no_skill" value="1"> Baseline (no skill)
         </label>
         <label>
-          <input type="checkbox" name="frontier" value="1"> Use Claude Sonnet
+          <input type="checkbox" name="frontier" value="1" checked> Use Claude Sonnet (faster + better)
         </label>
         <a href="/sample" class="btn btn-outline">Load sample lease</a>
       </div>
 
-      <div id="loading-msg" class="loading-msg">
-        <div class="spinner"></div>
-        <span>Analyzing... (this takes ~60s)</span>
+      <div id="loading-msg" style="display:none; margin-top:12px; font-size:13px; color:#888;">
+        ⏳ Analyzing... this takes 10–90 seconds depending on model. Do not refresh.
+        <div style="margin-top:6px; height:4px; background:#e5e5e0; border-radius:2px; overflow:hidden;">
+          <div id="progress-bar" style="height:100%; width:0%; background:#1a1a18; border-radius:2px; transition:width 90s linear;"></div>
+        </div>
       </div>
     </form>
 
     <script>
-      function startLoading(form) {
+      function startLoading() {
         var btn = document.getElementById('analyze-btn');
-        btn.textContent = 'Analyzing... (this takes ~60s)';
-        btn.classList.add('loading');
-        document.getElementById('loading-msg').classList.add('visible');
+        var msg = document.getElementById('loading-msg');
+        var bar = document.getElementById('progress-bar');
+        btn.disabled = true;
+        btn.textContent = 'Analyzing...';
+        msg.style.display = 'block';
+        setTimeout(function() { bar.style.width = '95%'; }, 100);
       }
     </script>
   </div>
@@ -258,6 +263,46 @@ def load_history():
     return list(reversed(rows))
 
 
+def extract_scores(output_text: str) -> dict:
+    """Extract numeric scores from agent output text using multiple patterns."""
+    import re
+    scores = {"financial": None, "clauses": None, "exit": None, "overall": None}
+
+    fin_patterns = [
+        r'[Ff]inancial\s+[Rr]isk[:\s]+(\d+)',
+        r'[Ff]inancial[:\s]+(\d+)/100',
+        r'financial_score["\s:]+(\d+)',
+    ]
+    cla_patterns = [
+        r'[Cc]lause\s+[Rr]isk[:\s]+(\d+)',
+        r'[Ll]egal\s+[Cc]lause[:\s]+(\d+)',
+        r'[Cc]lauses[:\s]+(\d+)/100',
+        r'clause_score["\s:]+(\d+)',
+    ]
+    ex_patterns = [
+        r'[Ee]xit\s+[Rr]isk[:\s]+(\d+)',
+        r'[Ee]xit[:\s]+(\d+)/100',
+        r'exit_score["\s:]+(\d+)',
+    ]
+
+    def try_patterns(patterns, text):
+        for p in patterns:
+            m = re.search(p, text)
+            if m:
+                return int(m.group(1))
+        return None
+
+    scores["financial"] = try_patterns(fin_patterns, output_text)
+    scores["clauses"]   = try_patterns(cla_patterns, output_text)
+    scores["exit"]      = try_patterns(ex_patterns, output_text)
+
+    nums = [v for v in [scores["financial"], scores["clauses"], scores["exit"]] if v is not None]
+    if nums:
+        scores["overall"] = round(sum(nums) / len(nums))
+
+    return scores
+
+
 def extract_scores_from_log() -> dict:
     """Read the most recent run from logs/runs.jsonl for score display."""
     log_path = PROJECT_ROOT / "logs" / "runs.jsonl"
@@ -268,13 +313,12 @@ def extract_scores_from_log() -> dict:
         return {}
     try:
         entry = json.loads(lines[-1])
-        scores = {
+        return {
             "financial": entry.get("financial_score"),
             "clauses":   entry.get("clause_score"),
             "exit":      entry.get("exit_score"),
             "overall":   entry.get("overall_score"),
         }
-        return scores
     except Exception:
         return {}
 
@@ -361,6 +405,18 @@ def analyze():
         prefill=None,
         score_class=score_class,
     )
+
+
+@app.route("/warmup")
+def warmup():
+    """Pre-warm the local model so demo runs faster."""
+    proc = subprocess.run(
+        [sys.executable, "agent.py", "--text", "hello", "--no-skill"],
+        capture_output=True, text=True, timeout=120,
+        cwd=str(PROJECT_ROOT),
+    )
+    snippet = (proc.stdout or "done")[-100:]
+    return f"Model warmed up. ({snippet})"
 
 
 if __name__ == "__main__":
