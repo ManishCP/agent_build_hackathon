@@ -83,8 +83,14 @@ HTML_TEMPLATE = """
     .empty { text-align: center; color: #aaa; padding: 2rem; font-size: 13px; }
     .meta { font-size: 11px; color: #999; margin-top: 8px; }
     .divider { height: 1px; background: #e5e5e0; margin: 1rem 0; }
-    .spinner { display: none; }
-    form:not(.idle) .btn[type=submit] { opacity: 0.6; pointer-events: none; }
+    .loading-msg { display: none; align-items: center; gap: 10px; margin-top: 12px;
+                   font-size: 13px; color: #555; }
+    .loading-msg.visible { display: flex; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #ddd;
+               border-top-color: #1a1a18; border-radius: 50%;
+               animation: spin 0.8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn.loading { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -102,7 +108,8 @@ HTML_TEMPLATE = """
 
   <div class="card">
     <h2>Analyze a lease</h2>
-    <form method="POST" action="/analyze" enctype="multipart/form-data">
+    <form method="POST" action="/analyze" enctype="multipart/form-data"
+          onsubmit="startLoading(this)">
       <textarea name="lease_text" placeholder="Paste your commercial lease text here...
 
 Example: NNN lease at $8,500/month, 4% annual escalation, personal guarantee
@@ -116,7 +123,7 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
       </div>
 
       <div class="options">
-        <button type="submit" class="btn">Analyze lease</button>
+        <button type="submit" id="analyze-btn" class="btn">Analyze lease</button>
         <label>
           <input type="checkbox" name="no_skill" value="1"> Baseline (no skill)
         </label>
@@ -125,7 +132,21 @@ required, 60-day auto-renewal, holdover at 200%...">{{ prefill or '' }}</textare
         </label>
         <a href="/sample" class="btn btn-outline">Load sample lease</a>
       </div>
+
+      <div id="loading-msg" class="loading-msg">
+        <div class="spinner"></div>
+        <span>Analyzing... (this takes ~60s)</span>
+      </div>
     </form>
+
+    <script>
+      function startLoading(form) {
+        var btn = document.getElementById('analyze-btn');
+        btn.textContent = 'Analyzing... (this takes ~60s)';
+        btn.classList.add('loading');
+        document.getElementById('loading-msg').classList.add('visible');
+      }
+    </script>
   </div>
 
   {% if result %}
