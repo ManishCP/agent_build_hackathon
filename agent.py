@@ -3,16 +3,19 @@ Lease Analyzer Agent — TOA Agent Build Day 2026
 Analyzes commercial lease documents and outputs a risk report.
 
 Usage:
-    python agent.py "path/to/lease.txt"
+    python agent.py lease.txt
+    python agent.py lease1.txt lease2.txt lease3.txt
+    python agent.py --dir leases/
     python agent.py --text "LEASE AGREEMENT Section 4.2: Tenant shall pay..."
-    python agent.py "lease.txt" --no-skill    # baseline eval run
-    python agent.py "lease.txt" --frontier    # use Claude instead of Granite
+    python agent.py lease.txt --no-skill    # baseline eval run
+    python agent.py lease.txt --frontier    # use Claude instead of Granite
 """
 
 import sys
 import json
-import os
+import re
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from agentkit.loop import run_agent, tool
 from agentkit.llm import get_client
@@ -31,6 +34,10 @@ from skills.exit_risk.scripts.exit_checks import (
     check_exit_terms,
     calculate_worst_case_exit_cost,
 )
+
+# ── SCORE STATE — populated by tool calls during a run ───────────────────────
+_run_scores: dict = {}
+
 
 # ── REGISTER TOOLS ────────────────────────────────────────────────────────────
 
@@ -55,6 +62,7 @@ def analyze_financial_terms(
     true_cost = estimate_true_monthly_cost(lease_type, monthly_rent)
     result["estimated_true_monthly_cost"] = true_cost
     result["escalation_benchmark"] = benchmark_escalation_rate(escalation_pct)
+    _run_scores["financial_score"] = result.get("risk_score")
     return json.dumps(result)
 
 
@@ -79,6 +87,7 @@ def analyze_legal_clauses(
         subletting_allowed,
         landlord_entry_notice_days
     )
+    _run_scores["clause_score"] = result.get("risk_score")
     return json.dumps(result)
 
 
@@ -106,9 +115,10 @@ def analyze_exit_terms(
     worst_case = calculate_worst_case_exit_cost(
         early_termination_penalty_months,
         holdover_rent_multiplier,
-        monthly_rent=5000  # default if not extracted
+        monthly_rent=5000
     )
     result["worst_case_exit_cost_usd"] = worst_case
+    _run_scores["exit_score"] = result.get("risk_score")
     return json.dumps(result)
 
 
@@ -138,59 +148,206 @@ def load_skills(use_skill: bool) -> str:
     return skill_text
 
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
+# ── PDF EXTRACTION ────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="Lease Analyzer Agent")
-    parser.add_argument("input", help="Path to lease file or use --text for inline")
-    parser.add_argument("--text", action="store_true", help="Treat input as raw text")
-    parser.add_argument("--no-skill", action="store_true", help="Run without skills (baseline)")
-    parser.add_argument("--frontier", action="store_true", help="Use Claude instead of Granite")
-    args = parser.parse_args()
+def extract_pdf_text(path: Path) -> str:
+    """Extract text from a PDF file."""
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(str(path))
+        return "\n".join(page.extract_text() for page in reader.pages)
+    except ImportError:
+        return f"[PDF: {path.name} — install pypdf to extract text: uv add pypdf]"
+    except Exception as e:
+        return f"[PDF extraction failed: {e}]"
 
-    # Read lease content
-    if args.text:
-        lease_content = args.input
-    else:
-        lease_path = Path(args.input)
-        if not lease_path.exists():
-            print(f"Error: file not found: {args.input}")
-            sys.exit(1)
-        lease_content = lease_path.read_text()
 
-    # Select model
-    model = "claude-sonnet-4-6" if args.frontier else "granite4:micro"
+# ── COMBINED SCORECARD ────────────────────────────────────────────────────────
 
-    # Load skills
-    skill_text = load_skills(use_skill=not args.no_skill)
+def print_combined_scorecard(results: list[dict]) -> None:
+    """Print a combined scorecard table across all analyses."""
+    print("\n" + "=" * 70)
+    print("COMBINED SCORECARD — ALL SKILLS")
+    print("=" * 70)
+    print(f"\n{'Lease':<30} {'Financial':>10} {'Clauses':>10} {'Exit':>10} {'Overall':>10}")
+    print("-" * 70)
 
-    mode = "NO-SKILL (baseline)" if args.no_skill else "WITH SKILLS"
+    for r in results:
+        name = Path(r.get("filename", "unknown")).stem[:28]
+        fin  = r.get("financial_score")
+        cla  = r.get("clause_score")
+        ex   = r.get("exit_score")
+
+        scores = [s for s in [fin, cla, ex] if isinstance(s, (int, float))]
+        overall = round(sum(scores) / len(scores)) if scores else None
+
+        if isinstance(overall, (int, float)):
+            if overall >= 70:
+                label = "🟢 LOW RISK"
+            elif overall >= 40:
+                label = "🟡 MEDIUM"
+            else:
+                label = "🔴 HIGH RISK"
+        else:
+            label = "—"
+
+        fin_str = f"{fin}/100"     if fin     is not None else "N/A"
+        cla_str = f"{cla}/100"     if cla     is not None else "N/A"
+        ex_str  = f"{ex}/100"      if ex      is not None else "N/A"
+        ov_str  = f"{overall}/100" if overall is not None else "N/A"
+
+        print(f"{name:<30} {fin_str:>10} {cla_str:>10} {ex_str:>10} {ov_str:>10}  {label}")
+
+    print("=" * 70)
+    print("\nScore guide: 0–39 = high risk  |  40–69 = review carefully  |  70–100 = acceptable\n")
+
+
+# ── LOGGING ───────────────────────────────────────────────────────────────────
+
+def log_run(result: dict) -> None:
+    """Append run metrics to logs/runs.jsonl."""
+    Path("logs").mkdir(exist_ok=True)
+
+    scores = [s for s in [
+        result.get("financial_score"),
+        result.get("clause_score"),
+        result.get("exit_score"),
+    ] if isinstance(s, (int, float))]
+    overall = round(sum(scores) / len(scores)) if scores else None
+
+    log_entry = {
+        "timestamp":       datetime.now(timezone.utc).isoformat(),
+        "filename":        result.get("filename"),
+        "model":           result.get("model"),
+        "skill_used":      result.get("skill_used"),
+        "financial_score": result.get("financial_score"),
+        "clause_score":    result.get("clause_score"),
+        "exit_score":      result.get("exit_score"),
+        "overall_score":   overall,
+        "turns":           result.get("turns"),
+        "tokens":          result.get("tokens"),
+        "cost_usd":        result.get("cost"),
+        "latency_seconds": result.get("latency"),
+    }
+    with open("logs/runs.jsonl", "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
+    print(f"[logged to logs/runs.jsonl]")
+
+
+# ── SINGLE FILE ANALYSIS ──────────────────────────────────────────────────────
+
+def run_lease_analysis(filename: str, content: str, model: str,
+                       skill_text: str, use_skill: bool) -> dict:
+    """Run full analysis on one lease document. Returns result dict."""
+    global _run_scores
+    _run_scores = {}  # reset scores for this run
+
+    mode = "WITH SKILLS" if use_skill else "NO-SKILL (baseline)"
     print(f"\n{'='*60}")
-    print(f"Lease Analyzer Agent — {mode} — model: {model}")
+    print(f"Analyzing: {filename}")
+    print(f"Mode: {mode} | Model: {model}")
     print(f"{'='*60}\n")
 
     task = f"""
 Analyze the following commercial lease document and produce a complete risk report.
 
 Extract all financial terms, legal clauses, and exit conditions you can find.
-Call the analysis tools with the values you extract.
+Call ALL THREE analysis tools (analyze_financial_terms, analyze_legal_clauses,
+analyze_exit_terms) with the values you extract.
 If a value is not stated in the lease, use a conservative default and note it.
 
 LEASE DOCUMENT:
-{lease_content}
+{content}
 """
 
-    result = run_agent(
+    agent_result = run_agent(
         task=task,
         tools=[analyze_financial_terms, analyze_legal_clauses, analyze_exit_terms],
         skill=skill_text,
         model=model,
     )
 
-    print(result.answer)
+    print(agent_result.answer)
     print(f"\n{'─'*60}")
-    print(f"turns={result.turns} | tool_calls={result.tool_calls} | "
-          f"tokens={result.tokens} | cost=${result.cost:.4f} | latency={result.latency:.1f}s")
+    print(f"turns={agent_result.turns} | tool_calls={agent_result.tool_calls} | "
+          f"tokens={agent_result.tokens} | cost=${agent_result.cost:.4f} | latency={agent_result.latency:.1f}s")
+
+    result = {
+        "filename":        filename,
+        "model":           model,
+        "skill_used":      use_skill,
+        "financial_score": _run_scores.get("financial_score"),
+        "clause_score":    _run_scores.get("clause_score"),
+        "exit_score":      _run_scores.get("exit_score"),
+        "turns":           agent_result.turns,
+        "tool_calls":      agent_result.tool_calls,
+        "tokens":          agent_result.tokens,
+        "cost":            agent_result.cost,
+        "latency":         agent_result.latency,
+        "answer":          agent_result.answer,
+    }
+    return result
+
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="Lease Analyzer Agent")
+    parser.add_argument("inputs", nargs="*", help="Lease file path(s)")
+    parser.add_argument("--text", type=str, help="Analyze inline text directly")
+    parser.add_argument("--dir", type=str, help="Analyze all .txt/.pdf files in a directory")
+    parser.add_argument("--no-skill",  action="store_true", help="Run without skills (baseline)")
+    parser.add_argument("--frontier",  action="store_true", help="Use Claude Sonnet instead of Granite")
+    args = parser.parse_args()
+
+    model      = "claude-sonnet-4-6" if args.frontier else "granite4:micro"
+    use_skill  = not args.no_skill
+    skill_text = load_skills(use_skill)
+
+    # ── Collect files to process ──────────────────────────────────────────────
+    files_to_process: list[tuple[str, str]] = []  # (filename, content)
+
+    if args.text:
+        files_to_process = [("inline-text", args.text)]
+    elif args.dir:
+        d = Path(args.dir)
+        if not d.is_dir():
+            print(f"Error: not a directory: {args.dir}")
+            sys.exit(1)
+        for ext in ["*.txt", "*.pdf"]:
+            for f in sorted(d.glob(ext)):
+                if f.name == "README.md":
+                    continue
+                content = extract_pdf_text(f) if f.suffix == ".pdf" else f.read_text()
+                files_to_process.append((str(f), content))
+        if not files_to_process:
+            print(f"No .txt or .pdf files found in {args.dir}")
+            sys.exit(1)
+    elif args.inputs:
+        for inp in args.inputs:
+            p = Path(inp)
+            if not p.exists():
+                print(f"Warning: file not found: {inp}, skipping")
+                continue
+            content = extract_pdf_text(p) if p.suffix == ".pdf" else p.read_text()
+            files_to_process.append((str(p), content))
+    else:
+        # Default: sample lease
+        default = Path("evals/files/sample_lease.txt")
+        if not default.exists():
+            print("Error: no input provided and default sample not found")
+            sys.exit(1)
+        files_to_process = [(str(default), default.read_text())]
+
+    # ── Process each file ─────────────────────────────────────────────────────
+    all_results = []
+    for filename, content in files_to_process:
+        result = run_lease_analysis(filename, content, model, skill_text, use_skill)
+        log_run(result)
+        all_results.append(result)
+
+    # ── Combined scorecard (always shown) ─────────────────────────────────────
+    print_combined_scorecard(all_results)
 
 
 if __name__ == "__main__":

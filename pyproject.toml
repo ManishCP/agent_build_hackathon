@@ -5,6 +5,7 @@ description = "Commercial lease analyzer agent — TOA Agent Build Day 2026"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
+    "flask>=3.1.3",
     "ollama>=0.4.0",
 ]
 
